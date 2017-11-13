@@ -1,0 +1,932 @@
+'module for VBA (to install in a macro of a blank Excell file)
+
+'MIT License
+
+'Copyright (c) 2017   Claude G.Dufour dufourcg@gmail.com
+
+'Permission is hereby granted, free of charge, to any person obtaining a copy
+'of this software and associated documentation files (the "Software"), to deal
+'in the Software without restriction, including without limitation the rights
+'to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+'copies of the Software, and to permit persons to whom the Software is
+'furnished to do so, subject to the following conditions:
+
+'The above copyright notice and this permission notice shall be included in all
+'copies or substantial portions of the Software.
+
+'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+'IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+'FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+'AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+'LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+'OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+'SOFTWARE.
+
+
+
+Option Explicit
+Public N As Integer, N2 As Integer, N6 As Integer, numENTER_tempAFFI As Integer, SINGULAR As Boolean
+Public Const cr As String = vbLf
+
+
+
+'to enable the display of a message box with a timeout value 
+Private Declare Function FindWindow Lib "user32" Alias "FindWindowA" (ByVal lpClassName As String, ByVal lpWindowName As String) As Long
+Declare Function MessageBoxTimeout Lib "user32.dll" Alias "MessageBoxTimeoutA" (ByVal hwnd As Long, ByVal lpText As String, _
+ByVal lpCaption As String, ByVal uType As Long, ByVal wLanguageID As Long, ByVal lngMilliseconds As Long) As Long
+
+
+Sub launch()
+
+ params.Label1.Caption = "Starting from the pre-existent displayed tri-dimensional probability distribution or from series of randomly generated distributions" + _
+ " the software computes the 3 two-dimensional marginal distributions and uses these exclusively to generate a new tri-dimensional probability distribution" + cr + _
+ "- either by means of IPF with uniform seed (without any zero-cell issue)" + cr + _
+ "- or by maximizing the entropy (uncertainty) of the distribution" + cr + "   through the determination of Lagrange multipliers by means of an iterative process." + cr + cr + _
+ "In order to avoid too long runtimes, a routine manages the cells with an obligatorily fixed probability."
+ 
+ 
+ params.Show
+
+
+End Sub
+
+Sub IPF_LAGRANGE_3D() '3 dimensions
+
+
+'P = table  P(i, j, k)  = Pijk
+'Pmarg(1,u,v) = table of marginal law P.uv
+'Pmarg(2,u,v) = table of marginal law pu.v
+'Pmarg(3,u,v) = table of marginal law puv.
+'lambda(1,J,K) = LAMBDA.jk
+'lambda(2,J,K) = LAMBDAj.K
+'lambda(3,J,K) = LAMBDAjk.
+
+'RANDOM indicates whether a RANDOM dataset has to be generated
+'RANDOM is also used to indicate that the original dataset is free from any correlation
+'P is not normalized but U= Uncertainty of normalized corresponding probability
+
+If params.TextBox1 = "*" Then Stop
+Dim percentagezero As Integer: percentagezero = Val(params.TextBox1)
+Dim w$, ntrials As Integer, Nold As Integer, RANDOM As Boolean
+Do While percentagezero > 100 Or percentagezero < 0: params.Hide: params.Show: Loop: params.Hide
+
+N = 3: Worksheets(1).Select: On Error GoTo out
+
+
+
+Do 'various trials
+11 w$ = Str(N)
+  If ntrials < 1 Then
+    numENTER_tempAFFI = 0
+    If Nold = 0 Or RANDOM Then w$ = InputBox(cr + "Choose N = maximum value of the indices of Pijk" + cr, "Removing ternary correlations from Pijk  for i, j, k = 1...N", w$)
+    
+    N = Val(w$)
+    If N = 0 Then Exit Sub Else If N < 2 Then MsgBox "Minimum value = 2": N = 2: GoTo 11
+    
+    
+    Dim div$, i As Integer, j As Integer, k As Integer, m As Integer, NmeanR As Integer, MeanR As Double, errorIPFP As Boolean, limit As Double, totSINGULAR As Double
+    Dim S As Double, total As Double, Uinitial As Double, x As Double, oldFITfactor As Double, fitfactor As Double, kk As Integer, o As Integer
+    Dim zt1 As Double, zt2 As Double, variation As Double, oldvariation As Double, sample As Double, i0 As Integer, j0 As Integer, k0 As Integer, i1 As Integer, j1 As Integer, k1 As Integer
+    ReDim porigin(1 To 1, 1 To 1, 1 To 1) As Double
+    
+    If N > 6 Then RANDOM = True Else If Nold = 0 Then If (Worksheets(1).Cells(5 + N ^ 3, 1) <> "" And Worksheets(1).Cells(6 + N ^ 3, 1) = "") Then RANDOM = False
+    errorIPFP = False
+        ReDim pmarg(1 To 3, 1 To N, 1 To N) As Double
+        N = N + 1
+        On Error GoTo -1: On Error GoTo error: ReDim p(1 To N - 1, 1 To N - 1, 1 To N - 1) As Double '<max456-457
+        N = N - 1
+        'test error 9
+2       x = p(1, 1, 1)
+        On Error GoTo 0
+        If N <> Val(w$) Then MeanR = 0: NmeanR = 0
+  End If
+
+
+  'initialisations
+  If N > 30 Then rapport.Left = 450: rapport.Top = 200: rapport.Height = 40: rapport.Width = 180: rapport.T.Text = "": rapport.Caption = "Initializations"
+  N2 = N / 2.3: N6 = N / 6.2: If N6 = 0 Then N6 = 1
+
+  affi30
+  ReDim pmarg(1 To 3, 1 To N, 1 To N) As Double
+  If errorIPFP Then ReDim p(0, 0, 0) 'in order to free memory space
+  ReDim lambda(1 To 3, 1 To N, 1 To N) As Double
+
+  If N <> Nold Then settingDISPLAY
+  If N < 6 Then
+        m = 6: i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1: k = 0: Do While k < N: k = k + 1
+        Worksheets(1).Cells(m, 7) = "": Worksheets(1).Cells(m, 8) = "": Worksheets(1).Cells(m, 9) = ""
+        m = m + 1: Loop: Loop: Loop
+   End If
+ 
+  Randomize 1
+  Do
+     m = 6: S = 0: total = 0: i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1: k = 0: Do While k < N: k = k + 1
+       If RANDOM Then
+           Do: x = Rnd(1): Loop Until x > 0
+           If Rnd(2) < (percentagezero / 100) Then x = 0
+           If N < 6 Then Worksheets(1).Cells(m, 6) = x: m = m + 1
+        Else
+            x = Worksheets(1).Cells(m, 6): m = m + 1
+        End If
+    If Not errorIPFP Then p(i, j, k) = x
+    pmarg(1, j, k) = pmarg(1, j, k) + x
+    pmarg(2, i, k) = pmarg(2, i, k) + x
+    pmarg(3, i, j) = pmarg(3, i, j) + x
+    total = total + x
+    If x > 0 Then S = S - x * Log(x)
+    Loop: Loop: If i / N6 = i \ N6 Then affi30
+    Loop
+  
+   'Display of Pijk before it is modified by IPFP or netP
+   If RANDOM Then DISPLAYcolumn 6, lambda, p, p, False
+      
+   If allPfixed(p, i0, j0, k0, i1, j1, k1) Then
+        RANDOM = True
+        TEMPaffi "No other 3-D distribution has the same marginals", 1, "No ternary correlation to be removed": beep
+    Else
+        RANDOM = False
+    End If
+  Loop Until (total > 0) And RANDOM = False
+  
+  RANDOM = True: ntrials = ntrials - 1: totSINGULAR = 0
+  Uinitial = S / total + Log(total) - Log(2)
+  
+  ' Call NORMALIZATION(P, Pmarg, errorIPFP, Uinitial, S, NmeanR, total)
+  'verif_MARG p, pmarg, x
+ 
+  Remove_fixed_P porigin, p, i, j, k, pmarg, SINGULAR, totSINGULAR: DISPLAYcolumn 9, lambda, p, porigin, True
+  limit = (total - totSINGULAR) ^ (2 / 3) * 7.83 * 10 ^ -17 * N ^ 0.5 'experienced for N=2 ;total^(2/3) to account for following optimized for total = 1
+
+
+
+
+
+
+'LAGRANGE multipliers                           ///////////////////////////////////////////////////////////////////////////////////////
+'LAGRANGE multipliers                           ///////////////////////////////////////////////////////////////////////////////////////
+'LAGRANGE multipliers                           ///////////////////////////////////////////////////////////////////////////////////////
+'LAGRANGE multipliers                           ///////////////////////////////////////////////////////////////////////////////////////
+'LAGRANGE multipliers                           ///////////////////////////////////////////////////////////////////////////////////////
+
+
+
+If N > 30 Then rapport.Caption = "Iterative evaluation of multipliers": rapport.T.Text = "": DoEvents
+
+zt1 = Timer
+x = (total - totSINGULAR) ^ (1 / 3) / N
+
+kk = 0: Do: kk = kk + 1
+    
+    k = 0: Do While k < 3: k = k + 1: i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1
+      If pmarg(k, j, i) > 0 Then lambda(k, j, i) = x
+    Loop: Loop: Loop
+
+
+    o = 0: Do 'beginning of the ITERATION
+        k = 0: Do While k < 3: k = k + 1: i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1
+            S = 0
+            Select Case k
+            Case 1
+                m = 0: Do While m < N: m = m + 1: S = S + lambda(2, m, i) * lambda(3, m, j): Loop
+            Case 2
+                m = 0: Do While m < N: m = m + 1: S = S + lambda(1, m, i) * lambda(3, j, m): Loop
+            Case 3
+                m = 0: Do While m < N: m = m + 1: S = S + lambda(2, j, m) * lambda(1, i, m): Loop
+            End Select
+           If S > 0 Then lambda(k, j, i) = pmarg(k, j, i) / S
+        Loop: Loop: Loop
+        'If kk = 1 Then If MsgBox(Str(sample - lambda(1, j0, k0) * lambda(2, i0, k0)), vbYesNo, "CONTINUE?") <> 6 Then Stop
+
+
+        o = o + 1: i = 0
+        If o \ 3 = o / 3 Then affi30
+        If o > 3275 Then
+            i = MsgBox(Str(Abs(sample - lambda(1, j0, k0) * lambda(2, i0, k0))) + cr + "Determining Lagrange multipliers takes too much time" + cr + "STOP IT ?", vbYesNoCancel + 256, ""): If i = 6 Then Exit Do Else If i = 2 Then End
+            o = 1
+        End If
+    
+        If Abs(sample - lambda(1, j0, k0) * lambda(2, i0, k0)) < limit Then Exit Do
+        sample = lambda(1, j0, k0) * lambda(2, i0, k0)
+    Loop
+    If i = 6 Then Exit Do
+Loop Until kk > 200 / N 'end kk loop
+
+zt1 = 1000 * (Timer - zt1) / kk: If zt1 = 0 Then zt1 = 0.001
+
+
+If o <> 3275 Then If Not errorIPFP Then div$ = cr + "Divergence KL= SUM Pijk_initial . LOG Pijk_initial/Pijk_final=" & Format_coma(calc_Div_KL(lambda, p, total), "#0.0000000000000") + cr + String(62, "_") + cr: affi30
+
+
+If N > 30 Then rapport.Caption = "   Drafting of the report": rapport.T.Text = "": DoEvents
+w$ = "LAGRANGE multipliers method    Runtime=" & Str(Int(100 * zt1) / 100) & " ms." & cr & String(24, "*")
+w$ = w$ + report(p, pmarg, Uinitial, True, lambda, porigin, total)
+DISPLAYcolumn 7, lambda, p, porigin, False
+
+
+
+
+'IPFprocedure                             ///////////////////////////////////////////////////////////////////////////////////////
+'IPFprocedure                             ///////////////////////////////////////////////////////////////////////////////////////
+'IPFprocedure                             ///////////////////////////////////////////////////////////////////////////////////////
+'IPFprocedure                             ///////////////////////////////////////////////////////////////////////////////////////
+'IPFprocedure                             ///////////////////////////////////////////////////////////////////////////////////////
+
+If Not errorIPFP Then
+    If N > 30 Then rapport.Caption = " Iterative Proportional Fitting": rapport.T.Text = "": DoEvents
+    affi30
+
+    zt2 = Timer
+
+    x = (total - totSINGULAR) / N: x = x / N: x = x / N
+
+    kk = 0: Do: kk = kk + 1
+
+        '1) initialization of P
+        i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1: k = 0: Do While k < N: k = k + 1
+            p(i, j, k) = x
+        Loop: Loop: Loop
+
+
+
+        Do 'ITERATIVE proportional fitting
+ 
+            If kk \ 2 <> kk / 2 Then affi30
+ 
+            'iteration stage #1
+            i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1
+                k = 0: S = 0: Do While k < N: k = k + 1: S = S + p(i, j, k): Loop
+                k = 0: Do While k < N: k = k + 1
+                   If S <> 0 Then p(i, j, k) = p(i, j, k) * pmarg(3, i, j) / S
+                Loop
+            Loop: Loop
+      
+            'iteration stage #2
+            i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1
+                k = 0: S = 0:  Do While k < N: k = k + 1: S = S + p(i, k, j): Loop
+                k = 0: Do While k < N: k = k + 1
+                   If S <> 0 Then p(i, k, j) = p(i, k, j) * pmarg(2, i, j) / S
+                Loop
+            Loop: Loop
+       
+            'iteration stage #3
+            i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1
+                k = 0: S = 0: Do While k < N: k = k + 1: S = S + p(k, i, j): Loop    ' calculus of p2MARG 1
+                k = 0: Do While k < N: k = k + 1
+                    If S <> 0 Then p(k, i, j) = p(k, i, j) * pmarg(1, i, j) / S
+                Loop
+            Loop: Loop
+
+  
+            'If kk = 1 Then If MsgBox("", vbYesNo, "CONTINUE?") <> 6 Then Stop
+
+            If Timer - zt2 > zt1 / 300 Then
+                k = 0: S = 0: Do While k < N: k = k + 1: S = S + p(i0, j0, k): Loop
+                fitfactor = Abs(pmarg(3, i0, j0) - S)
+                k = 0: S = 0: Do While k < N: k = k + 1: S = S + p(i1, j1, k): Loop
+                fitfactor = fitfactor + Abs(pmarg(3, i1, j1) - S)
+                'Emergency exit
+                If fitfactor <> 0 Then If (oldFITfactor = fitfactor) Or (oldFITfactor <= fitfactor And fitfactor < limit * 666 * N) Then oldFITfactor = 0: Exit Do
+                'MsgBox Str(fitfactor - oldFITfactor)
+                If fitfactor < limit Then Exit Do
+                oldFITfactor = fitfactor
+            Else
+                variation = Abs(sample - p(i0, j0, k0) * p(i1, j1, k1))   'MsgBox Str(FITfactor) & CR & Str(variation)
+                If variation < 1.5 * limit / (N ^ 1.4) / 1000 Then Exit Do
+                sample = p(i0, j0, k0) * p(i1, j1, k1) 'MsgBox (variation = oldvariation) & "=ég variation         égFIT=  " '<<<<<<<<<<<<<<<<
+                If variation <> 0 Then If variation = oldvariation Then Exit Do
+                oldvariation = variation
+                If Timer - zt2 > N * 3 Then MsgBox "Took too much time": Stop
+            End If
+        Loop
+        affi30
+    Loop Until kk > 200 / N 'end kk loop
+    zt2 = 1000 * (Timer - zt2) / kk
+
+    DISPLAYcolumn 8, lambda, p, porigin, False
+
+    If N > 30 Then rapport.Caption = "   Drafting of the report": rapport.T.Text = "": DoEvents
+    w$ = w$ & cr & "IPF Procedure   Runtime "
+    If zt2 > 0 Then w$ = w$ & "=" & Str(Int(100 * zt2) / 100) & " ms.  (" & Format_coma(zt2 / zt1, "#0.00") & " times slower)": _
+    NmeanR = NmeanR + 1: MeanR = -1 + ((MeanR + 1) * (NmeanR - 1) + Log(zt2 / zt1)) * (1 / NmeanR): w$ = w$ & "  <ratio>=  " & Format_coma((2.71828) ^ (1 + MeanR), "#0.00")
+    w$ = w$ & cr & String(12, "*")
+    S = N: S = S * N: S = S * N: w$ = w$ & cr & "NB: all cell values were initially set to 1/N³=1/" + LTrim(Str(S)) + " (U=" & Format_coma(3 * Log(N) - Log(2), "#0.00000000000") + ")"
+    w$ = w$ + report(p, pmarg, Uinitial, False, lambda, porigin, total)
+End If 'end of "If Not errorIPFP Then"
+
+
+
+
+
+w$ = w$ + cr + div$ + alternative_def(p, pmarg, total)
+If rapport.Height < 240 Then rapport.Height = 240
+rapport.T.Text = "": rapport.Left = 700: rapport.Top = 20: rapport.Width = 300: rapport.Caption = "N =" & Str(N) & "   U_initial =" & Format_coma(Uinitial, "#0.0000000000000") & "   Zeros:" + Str(percentagezero) + "%   Trial #" & Str(NmeanR)
+affi w$
+
+
+
+
+On Error GoTo out
+ If Nold = N Then
+    If ntrials < 0 Then
+        w$ = "0": w$ = InputBox("Do you still want to repeat this test ?" + cr + cr + cr + cr + cr + cr + cr + _
+        "How many times ?", "We detected the test for N=" + Str(N) + " has been performed twice.", w$)
+        ntrials = Val(w$): If w$ = "" Then End
+        Nold = 0
+    Else
+        w$ = " seconds left before next trial" + cr + cr + "Click to continue immediately" + cr + cr
+        If numENTER_tempAFFI <> -5 Then
+           TEMPaffi "4" + w$ + cr + "NB:  5 consecutive clicks disable this PAUSE", 4, "Pause for reading"
+        Else
+           TEMPaffi "11" + w$ + cr, 11, "Pause for reading"
+        End If
+    End If 'ntrials
+End If
+
+Nold = N
+Loop
+Exit Sub '----------------------------------------------------
+
+
+
+
+
+
+error:
+
+If Err.Number <> 6 And 7 <> Err.Number Then
+    MsgBox "'" + Err.Description + "'" + cr + cr + "MAYBE The size N of the table must be reduced!", vbOKOnly
+    Err.Clear: beep: beep: TEMPaffi w$, 3, "---"
+    errorIPFP = True: Resume Next
+End If
+
+
+
+out:
+'MsgBox Str(Err.Number)
+If Err.Number = 7 Or Err.Number = 6 Then ' automatic decrease of N
+On Error GoTo -1
+Err.Clear
+N = N - 1
+ReDim lambda(1 To 3, 1 To N, 1 To N) As Double
+ReDim p(1 To 1, 1 To 1, 1 To 1) As Double
+ 
+ 
+Select Case MsgBox("Maximum possible value of N on this system =" + Str(N) + cr + cr + "Do we launch 'LAGRANGE multipliers method' alone?", vbYesNoCancel, "IPFP can't be performed: it requires too much memory")
+Case 6 ' YES
+
+out1:
+    On Error GoTo -1
+    On Error GoTo out1
+    Err.Clear
+    N = N - 10
+    ReDim lambda(1 To 3, 1 To N, 1 To N) As Double
+    ReDim p(1 To 1, 1 To 1, 1 To 1) As Double
+    ReDim pmarg(1 To 3, 1 To N, 1 To N) As Double
+
+out10:
+    On Error GoTo -1
+    On Error GoTo out10
+    N = N - 1
+    ReDim lambda(1 To 3, 1 To N, 1 To N) As Double
+    ReDim p(1 To 1, 1 To 1, 1 To 1) As Double
+    ReDim pmarg(1 To 3, 1 To N, 1 To N) As Double
+    TEMPaffi "We are going to launch Lagrange method alone (with N=" + Str(N) + ")", 4, "Warning"
+    errorIPFP = True: GoTo 2
+
+Case 2 'cancel
+    End
+Case Else ' Other values.
+    On Error GoTo -1
+    On Error GoTo out2
+
+out2:
+    On Error GoTo -1
+    Err.Clear
+
+    If N > 450 Then N = N - 10: ReDim p(1 To N, 1 To N, 1 To N) As Double: N = N + 9: ReDim p(1 To N, 1 To N, 1 To N) As Double
+    N = N - 1: ReDim p(1 To N, 1 To N, 1 To N) As Double
+    If N = 1 Then N = 2: GoTo 11
+    TEMPaffi "We are going to launch both methods with N=" + Str(N), 4, "Warning"
+    GoTo 2
+End Select
+
+End If
+
+End Sub
+Function odds_ratio(lambda, p, modelambda) As String
+'to Verify that P_ijk  P_11k P_i11 P_1j1  -   P_1jk  P_i1k  P_ij1 P_111  =  0      ( i =2,… ,N ;  j=2,… ,N ;  k = 2,… ,N )
+'or that
+'       lambda(1, j, k) * lambda(2, i, k) * lambda(3, i, j)
+'     * lambda(1, 1, k) * lambda(2, 1, k) * lambda(3, 1, 1)
+'     * lambda(1, 1, 1) * lambda(2, i, 1) * lambda(3, i, 1)
+'     * lambda(1, j, 1) * lambda(2, 1, 1) * lambda(3, 1, j)
+'     - lambda(1, j, k) * lambda(2, 1, k) * lambda(3, 1, j)
+'     * lambda(1, 1, k) * lambda(2, i, k) * lambda(3, i, 1)
+'     * lambda(1, j, 1) * lambda(2, i, 1) * lambda(3, i, j)
+'     * lambda(1, 1, 1) * lambda(2, 1, 1) * lambda(3, 1, 1)=0
+
+
+
+Dim i As Integer, j As Integer, k As Integer, x As Double
+
+x = 0
+i = 2: Do While i < N: i = i + 1: j = 2: Do While j < N: j = j + 1: k = 2: Do While k < N: k = k + 1
+    If modelambda Then
+      x = x + lambda(1, j, k) * lambda(2, i, k) * lambda(3, i, j) * lambda(1, 1, k) * lambda(2, 1, k) * lambda(3, 1, 1) _
+              * lambda(1, 1, 1) * lambda(2, i, 1) * lambda(3, i, 1) * lambda(1, j, 1) * lambda(2, 1, 1) * lambda(3, 1, j) _
+            - (lambda(1, j, k) * lambda(2, 1, k) * lambda(3, 1, j) * lambda(1, 1, k) * lambda(2, i, k) * lambda(3, i, 1) _
+              * lambda(1, j, 1) * lambda(2, i, 1) * lambda(3, i, j) * lambda(1, 1, 1) * lambda(2, 1, 1) * lambda(3, 1, 1))
+    Else
+        x = x + p(i, j, k) * p(1, 1, k) * p(i, 1, 1) * p(1, j, 1) - p(1, j, k) * p(i, 1, k) * p(i, j, 1) * p(1, 1, 1)
+    End If
+Loop: Loop: Loop
+
+odds_ratio = "Odds ratio: <Pijk * P11k * Pi11 * P1j1 - P1jk * Pi1k * Pij1 * P111> = "
+If x = 0 Then odds_ratio = odds_ratio + " 0" Else odds_ratio = odds_ratio + Format(Abs(x) / (N - 1) ^ 3, "0.0 E+00")
+odds_ratio = odds_ratio + cr + String(62, "_")
+
+End Function
+
+
+
+Function calc_Div_KL(lambda, p, total) As Double 'KULLBACK LEIBLER
+Dim i As Integer, j As Integer, k As Integer, S As Double
+
+S = 0: i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1: k = 0: Do While k < N: k = k + 1
+    If p(i, j, k) <> 0 Then If lambda(1, j, k) * lambda(2, i, k) * lambda(3, i, j) > 0 Then S = S + p(i, j, k) * Log(p(i, j, k) / (lambda(1, j, k) * lambda(2, i, k) * lambda(3, i, j)))
+Loop: Loop: If i / N2 = i \ N2 Then affi30
+Loop
+ calc_Div_KL = S / total
+
+End Function
+
+Function exactFITfactor(pmarg, p, S, x, modelambda As Boolean, lambda, porigin)
+
+Dim norm As Double, som As Double, i As Integer, j As Integer, k As Integer, so(3) As Double
+
+norm = 0
+i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1
+
+k = 0: so(1) = 0: so(2) = 0: so(3) = 0: Do While k < N: k = k + 1
+
+If modelambda Then
+    som = (lambda(1, j, k) * lambda(2, i, k) * lambda(3, i, j))
+    If SINGULAR Then If som = 0 Then som = porigin(i, j, k)
+    
+    so(3) = so(3) + som
+    som = (lambda(1, k, j) * lambda(2, i, j) * lambda(3, i, k))
+    If SINGULAR Then If som = 0 Then som = porigin(i, k, j)
+    
+    so(2) = so(2) + som
+    
+    som = (lambda(1, j, i) * lambda(2, k, i) * lambda(3, k, j))
+    If SINGULAR Then If som = 0 Then som = porigin(k, j, i) ': If som <> 0 Then Stop
+    so(1) = so(1) + som
+Else
+    If SINGULAR And p(i, j, k) = 0 Then so(3) = so(3) + porigin(i, j, k) Else so(3) = so(3) + p(i, j, k)
+    If SINGULAR And p(i, k, j) = 0 Then so(2) = so(2) + porigin(i, k, j) Else so(2) = so(2) + p(i, k, j)
+    som = p(k, j, i)
+    If SINGULAR And som = 0 Then som = porigin(k, j, i) Else som = p(k, j, i) ': If P(k, j, i) <> 0 Then Stop
+    so(1) = so(1) + som
+End If
+
+    x = x + som
+    'MsgBox Str(som)
+    If som > 0 Then S = S - som * Log(som)
+Loop
+
+If Abs((pmarg(3, i, j) - so(3))) > 10 ^ -15 Then norm = norm + Abs((pmarg(3, i, j) - so(3)) / so(3))
+If Abs((pmarg(2, i, j) - so(2))) > 3 * 10 ^ -15 Then norm = norm + Abs((pmarg(2, i, j) - so(2)) / so(2)) ': Stop
+If Abs((pmarg(1, j, i) - so(1))) > 10 ^ -15 Then norm = norm + Abs((pmarg(1, j, i) - so(1)) / so(1)) ': Stop
+
+
+Loop: If i / N2 = i \ N2 Then affi30
+Loop
+
+S = S / x + Log(x) - Log(2)
+exactFITfactor = norm
+
+End Function
+
+Function alternative_def(p, pmarg, total) As String
+
+ReDim pi(1 To N) As Double, pj(1 To N) As Double, pk(1 To N) As Double: Dim x As Double, i As Integer, j As Integer, k As Integer, w$
+
+i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1: k = 0: Do While k < N: k = k + 1
+    pi(i) = pi(i) + p(i, j, k): pj(i) = pj(i) + p(j, i, k): pk(i) = pk(i) + p(j, k, i)
+Loop: Loop: Loop
+
+i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1: k = 0: Do While k < N: k = k + 1
+    x = (pi(i) * pmarg(1, j, k) + pj(j) * pmarg(2, i, k) + pk(k) * pmarg(3, i, j) - 2 * pi(i) * pj(j) * pk(k) / total) / (total * total)
+    If x < -0.01 Then
+        w$ = "!! In this peculiar case "
+
+        If N < 3 Then
+            w$ = w$ + "i.e. Pijk= "
+            i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1: k = 0: Do While k < N: k = k + 1
+                If j = 1 Then If i = 2 And k = 1 Then w$ = w$ + cr + "                                                    "
+                w$ = w$ + Format_coma(Abs(p(i, j, k)), "0.####") & "  ": Loop: If j = 1 Then w$ = w$ + "| "
+            Loop: Loop
+        End If
+        rapport.Height = 280: beep
+        w$ = w$ + cr + "vacuum of 3-correlations may not be defined by" + cr + "Pijk = Pi.. P.jk + P.j. Pi.k + P..k Pij. -2 Pi.. P.j. P..k"
+        w$ = w$ & cr & "because one of the P would be negative:  P(" + Str(i) + "," + Str(j) + "," + Str(k) + ") = -" + Format_coma(Abs(x), "0.####") + _
+        cr + String(62, "_") + cr
+        If numENTER_tempAFFI > 4 Then numENTER_tempAFFI = -5
+        alternative_def = w$
+        Exit Function
+     End If
+Loop: Loop: If i / N2 = i \ N2 Then affi30
+Loop
+
+End Function
+
+
+Sub affi(S As String)
+On Error GoTo e
+rapport.T.Text = rapport.T.Text + S
+rapport.Show vbModeless: DoEvents '£
+e:
+End Sub
+
+Sub affi30()
+
+    If N > 30 Then affi "#"
+    
+End Sub
+
+Sub sheetdisplay(lambda, p, porigin)
+
+Dim col As Integer, x As Double
+
+If N < 6 Then
+    Dim i As Integer, j As Integer, k As Integer, m As Integer
+    m = 6: i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1: k = 0: Do While k < N: k = k + 1
+        Worksheets(1).Cells(m, 1) = "P"
+        Worksheets(1).Cells(m, 2) = i
+        Worksheets(1).Cells(m, 3) = j
+        Worksheets(1).Cells(m, 4) = k
+        Worksheets(1).Cells(m, 5) = " ="
+        m = m + 1
+    Loop: Loop: Loop
+    
+    quad
+End If
+End Sub
+
+Sub quad()
+  
+  Range("f6:i" + LTrim(Str(5 + N ^ 3))).Select
+  Selection.Borders(xlDiagonalDown).LineStyle = xlNone
+  Selection.Borders(xlDiagonalUp).LineStyle = xlNone
+  With Selection.Borders(xlEdgeLeft)
+    .LineStyle = xlContinuous
+    .ColorIndex = 0
+    .TintAndShade = 0
+    .Weight = xlMedium
+  End With
+  With Selection.Borders(xlEdgeTop)
+    .LineStyle = xlContinuous
+    .ColorIndex = 0
+    .TintAndShade = 0
+    .Weight = xlMedium
+  End With
+  With Selection.Borders(xlEdgeBottom)
+    .LineStyle = xlContinuous
+    .ColorIndex = 0
+    .TintAndShade = 0
+    .Weight = xlMedium
+  End With
+  With Selection.Borders(xlEdgeRight)
+    .LineStyle = xlContinuous
+    .ColorIndex = 0
+    .TintAndShade = 0
+    .Weight = xlMedium
+  End With
+  Selection.Borders(xlInsideVertical).LineStyle = xlNone
+  With Selection.Borders(xlInsideHorizontal)
+    .LineStyle = xlDot
+    .ColorIndex = 0
+    .TintAndShade = 0
+    .Weight = xlThin
+  End With
+
+  Range("i2").Select
+End Sub
+
+
+Sub TEMPaffi(a$, b%, T$)
+
+    If numENTER_tempAFFI > 4 Then Exit Sub
+    Dim retval As Long, zz As Single: If b% = 4 Or b% = 11 Then zz = Timer
+    retval = MessageBoxTimeout(FindWindow(vbNullString, "8888888"), a$, T$, 0, 0, b% * 1000)
+    If numENTER_tempAFFI = -5 Then numENTER_tempAFFI = 5 Else If (b% = 4 Or b% = 11) Then If Timer < zz + b% Then numENTER_tempAFFI = numENTER_tempAFFI + 1
+End Sub
+
+Function Format_coma(x, a$) As String 'for getting  decimal point  even in french version of EXEL
+'Format_coma = Format(x, a$): Exit Function ' <------- for getting  coma instead of decimal point in french version of EXEL
+
+    a$ = Format(x, a$)
+
+    If Left(a$, 2) = "0," Then Format_coma = "0." + Mid(a$, 3): Exit Function
+    If Mid(a$, 2, 1) = "," Then Format_coma = Left(a$, 1) + "." + Mid(a$, 3): Exit Function
+    If Mid(a$, 3, 1) = "," Then Format_coma = Left(a$, 2) + "." + Mid(a$, 4): Exit Function
+
+End Function
+
+
+Function report(p, pmarg, Uinitial, modelambda As Boolean, lambda, porigin, total) As String
+
+If SINGULAR Then Call DOpMARG(porigin, pmarg) 'Calculating Pmarg with Porigin in order to do REPORT
+Dim norm As Double, S As Double, x As Double, y As Double, interm$
+S = 0: norm = 100 * exactFITfactor(pmarg, p, S, x, modelambda, lambda, porigin)
+If norm > 0.0001 Then beep: beep: report = cr & "PROCEDURE FAILED (marginal constraints not verified)" + cr + String(62, "_") + cr: Exit Function
+norm = norm / (3 * N): norm = norm / N
+x = Abs(100 * (1 - x / total))
+report = report & cr & "Increase of U =" + Format_coma(S, "#0.0000000000000") + " - " + Format_coma(Uinitial, "#0.0000000000000") _
++ " = " + Format_coma(S - Uinitial, "#0.0000000000000") _
++ cr & cr & "Normalization discrepancy ="
+
+interm$ = Str(x)
+If InStr(interm$, "E") > 0 Then interm$ = Left$(interm$, 4) & " " & Right$(interm$, 4) Else interm$ = Left$(interm$, 4)
+If Left$(interm$, 2) = " ." Then interm$ = Mid(interm$, 2, Len(interm$) - 1): interm$ = " 0" + interm$
+
+report = report & interm$ & " %" & cr + "Mean discrepancy with respect to given marginals          "
+
+If norm = 0 Then interm$ = "= 0" Else interm$ = "<" & Left$(Str(norm), 4) & " " & Right$(Str(norm), 4)
+report = report & interm$ & "  %" + cr + odds_ratio(lambda, p, modelambda)
+
+If SINGULAR Then Call DOpMARG(p, pmarg) 'Calculating Pmarg with P in order to do IPFP
+
+End Function
+
+
+
+
+Sub NORMALIZATION(p, pmarg, errorIPFP, Uinitial, S, NmeanR, total)
+
+Dim i As Integer, j As Integer, k As Integer, x As Double
+S = 0: x = 0:  j = 0: Do While j < N: j = j + 1: k = 0: Do While k < N: k = k + 1
+    i = 0: Do While i < 3: i = i + 1: pmarg(i, j, k) = pmarg(i, j, k) / total: Loop
+    i = 0: Do While i < N: i = i + 1: If p(i, j, k) > 0 Then p(i, j, k) = p(i, j, k) / total: S = S - p(i, j, k) * Log(p(i, j, k)): x = x + p(i, j, k)
+Loop: Loop: Loop
+
+    If Abs(Uinitial - S) > 10 ^ -13 Then If MsgBox("ERROR about Uncertainty value = " & Str(Uinitial) + " or " + Str(S) + " ££", vbYesNo, "CONTINUE?") <> 6 Then Stop
+
+total = 1
+
+End Sub
+
+
+
+
+Sub verif_MARG(p, pmarg, Un)
+
+Dim i As Integer, j As Integer, k As Integer, som1 As Double, som2 As Double, som3 As Double: Un = 0
+
+' calcul des P marginales p3  p2 p1
+i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1
+k = 0: som1 = 0: som2 = 0: som3 = 0: Do While k < N: k = k + 1: som1 = som1 + p(i, j, k)
+som2 = som2 + p(i, k, j)
+som3 = som3 + p(k, j, i)
+
+'CALC UNCERTAINTY
+If p(i, j, k) <> 0 Then Un = Un - p(i, j, k) * Log(p(i, j, k))
+
+Loop
+If Abs(pmarg(3, i, j) - som1) > 0.000000000000001 Then Stop: pmarg(3, i, j) = som1
+If Abs(pmarg(2, i, j) - som2) > 0.000000000000001 Then Stop: pmarg(2, i, j) = som2
+If Abs(pmarg(1, j, i) - som3) > 0.000000000000001 Then Stop: pmarg(1, j, i) = som3
+
+Loop: If N > 30 Then If i / 3 = i \ 3 Then affi "#"
+Loop
+
+
+
+End Sub
+Sub DOpMARG(p, pmarg) 'calculation of marginal laws
+
+Dim i As Integer, j As Integer, k As Integer, som1 As Double, som2 As Double, som3 As Double
+i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1
+    k = 0: som1 = 0: som2 = 0: som3 = 0: Do While k < N: k = k + 1: som3 = som3 + p(i, j, k): som2 = som2 + p(i, k, j): som1 = som1 + p(k, j, i)
+Loop
+pmarg(1, j, i) = som1
+pmarg(2, i, j) = som2
+pmarg(3, i, j) = som3
+Loop: Loop
+End Sub
+
+Sub settingDISPLAY()
+
+If Range("a" & Rows.Count).End(xlUp).ROW < 2 Then Exit Sub
+
+Range("J3:S19").Select
+Range("S19").Activate
+With Selection.Font
+       If N = 2 Then
+            .ColorIndex = xlAutomatic
+            .TintAndShade = 0
+        Else
+            .ThemeColor = xlThemeColorDark1
+            .TintAndShade = 0
+        End If
+End With
+
+Range("S33").Select:  Selection.Copy
+
+Dim z As Integer: z = Range("A" & Rows.Count).End(xlUp).ROW
+If z > N Then If z > N * N Then If z > (N * N * N + 6) Then Range("A" + LTrim(N * N * N + 6) + ":i" + LTrim(1 + Range("a" & Rows.Count).End(xlUp).ROW)).Select: ActiveSheet.Paste
+'Range("A5:J" + LTrim(1 + Range("a" & Rows.Count).End(xlUp).ROW)).Select: Selection.ClearContents
+If N < 6 Then
+    Worksheets(1).Cells(5, 6) = "Starting values": Worksheets(1).Cells(5, 7) = "Lagrange Meth": Worksheets(1).Cells(5, 8) = "  I P F P"
+    z = 6
+    Dim i As Integer, j As Integer, k As Integer
+
+    i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1: k = 0: Do While k < N: k = k + 1
+        Worksheets(1).Cells(z, 4) = k
+        Worksheets(1).Cells(z, 3) = j
+        Worksheets(1).Cells(z, 2) = i
+        Worksheets(1).Cells(z, 1) = "P"
+        Worksheets(1).Cells(z, 5) = "="
+        z = z + 1
+    Loop: Loop: Loop
+End If
+
+End Sub
+
+
+Sub DISPLAYcolumn(col As Integer, lambda, p, porigin, restricted)
+
+If N < 6 Then
+If col <> 6 And col <> 7 And col <> 8 And col <> 9 Then Stop
+    Dim i As Integer, j As Integer, k As Integer, m As Integer, x As Double
+    
+    m = 6: i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1: k = 0: Do While k < N: k = k + 1
+       If col = 7 Then
+          If SINGULAR Then
+            x = lambda(1, j, k) * lambda(2, i, k) * lambda(3, i, j)
+            If x = 0 Then Worksheets(1).Cells(m, 7) = porigin(i, j, k) Else Worksheets(1).Cells(m, 7) = x 'comPleting the list built from lambda's by means of Porigin
+            Else
+            Worksheets(1).Cells(m, 7) = lambda(1, j, k) * lambda(2, i, k) * lambda(3, i, j)
+          End If
+            
+       Else
+         
+          If SINGULAR Then
+            If restricted Then 'Print result of netP
+                Worksheets(1).Cells(m, 9) = p(i, j, k)
+            Else
+                x = p(i, j, k)
+                If col = 31 Then Worksheets(1).Cells(m, col) = p(i, j, k)
+                If col = 8 Or col = 9 Then If x = 0 Then Worksheets(1).Cells(m, col) = porigin(i, j, k) Else Worksheets(1).Cells(m, col) = x 'comPleting the list built from lambda's by means of Porigin
+                If col = 6 Then Worksheets(1).Cells(m, col) = p(i, j, k)
+            End If
+            Else
+          x = p(i, j, k)
+            Worksheets(1).Cells(m, col) = x
+         End If
+         
+         End If
+    m = m + 1: Loop: Loop: If i / N2 = i \ N2 Then affi30
+    Loop
+End If
+End Sub
+
+
+
+Sub Remove_fixed_P(porigin, p, i, j, k, pmarg, SINGULAR, totSINGULAR)
+
+'procedure is useful and applied only if there is at least one zero in table
+GoSub exit_if_no_zero:
+
+'If there is a row of null values except in one cell, this value can be varied without varying the total of the row
+'only if that cell is one of the vertices marqued + in the image 25.jpg.
+'the routine search for cubes (or rectangular prisms) similar to the one on the image
+'Let us call(i,j,k) the lowest coordinates of a vertex . If Pijk >0, three other vertices have to be >0.
+'They have to be located at coordinates(a,j,c);(i,b,c) and (a,b,k) whatever a,b,c are.
+'If no such configuration can be found, Pijk cannot be varied : the value of that cell is obligatorily fixed.
+'Fixed values can make runtimes of the 2 iterative algorithms extremely long.
+'because the fitting process for that cell in the direction of the zeros can decrease its value while the fitting process for the same cell in the 2 other direction increases its value.
+'This process is repeated so that convergence is very slow.
+'The remedy is simple: since these values are obligatorily fixed, let us remove them before the iterative process and let us restore then after the process
+
+'the algoritm results:
+'---------------------
+'Apply only if there is some zeros ( exit if no zero)
+'memorise P(i,j,k) into Porigin(i,j,k) for further recover (Porigin() = a clone copy of P())
+
+'Consider all possible values of i,j,k
+' If  P(i,j,k) > 0 then
+'   Consider all possible values of a  (i<a <=N)
+'   Consider all possible values of b,c  (1<b<N and 1<c<N)
+'   If P(a,b,k) >0 and P(a,j,c) >0 and P(i,b,c) >0 then assign a positive value to all probabilities of the rectangular prism
+
+'SINGULAR = true if at least one of the Pijk is fixed and removed  (if  nothing  is changed , SiNGULAR= false)
+'NB: Introducing a new positive probability can enable a new prism. So performing the procedure once is not enough: it has to be performed until no new PRISM is found.
+
+'This procedure removes all  p(i, j, k) > 0 which cannot be varied due to the marginal constraints
+'some p(i, j, k) = 0 substituted with '10^-15' to indicate that a positive value is expected there even if the original value was null
+
+ReDim porigin(1 To N, 1 To N, 1 To N) As Double
+Dim a As Integer, b As Integer, c As Integer, x As Double: x = 1
+i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1: k = 0: Do While k < N: k = k + 1: porigin(i, j, k) = p(i, j, k): Loop: Loop: Loop
+ReDim p(1 To N, 1 To N, 1 To N) As Double  '<erase P
+
+SINGULAR = True: Do While SINGULAR: GoSub findALLcubes: Loop
+
+
+i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1: k = 0: Do While k < N: k = k + 1
+If p(i, j, k) > 0 Then If porigin(i, j, k) = 0 Then p(i, j, k) = 10 ^ -15 Else p(i, j, k) = porigin(i, j, k)
+
+If p(i, j, k) = 0 Then If porigin(i, j, k) > 0 Then SINGULAR = True: totSINGULAR = totSINGULAR + porigin(i, j, k)
+Loop: Loop: Loop
+If SINGULAR Then If totSINGULAR = 0 Then Stop
+
+Call DOpMARG(p, pmarg)
+Exit Sub '__________________________________________________________________
+
+
+findALLcubes:
+    SINGULAR = False
+    i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1: k = 0: Do While k < N: k = k + 1
+        If porigin(i, j, k) > 0 Or p(i, j, k) > 0 Then GoSub ptetPvariable
+    Loop: Loop: If i / (2 * N6) = i \ (2 * N6) Then affi30
+    Loop
+Return
+
+
+ptetPvariable:
+a = 0: Do While a < N: a = a + 1: If a = i Then a = a + 1: If a > N Then Exit Do
+b = 0: Do While b < N: b = b + 1: If b = j Then b = b + 1: If b > N Then Exit Do
+If porigin(a, b, k) > 0 Or p(a, b, k) > 0 Then
+    c = 0: Do While c < N: c = c + 1: If c = k Then c = c + 1: If c > N Then Exit Do
+      'decreasing of Pijk,Pabk,Pajc,Pibc increasing of Pajk,Pibk,Pijc,Pabc
+      If porigin(a, j, c) * porigin(i, b, c) > 0 Or p(a, j, c) * p(i, b, c) > 0 Then
+        p(i, j, k) = x
+        p(a, b, k) = x
+        p(a, j, c) = x
+        p(i, b, c) = x
+        If p(a, j, k) = 0 Then p(a, j, k) = x: SINGULAR = True
+        If p(i, b, k) = 0 Then p(i, b, k) = x: SINGULAR = True
+        If p(i, j, c) = 0 Then p(i, j, c) = x: SINGULAR = True
+        If p(a, b, c) = 0 Then p(a, b, c) = x: SINGULAR = True
+        
+        Return
+      End If
+    Loop 'c
+ End If
+Loop: Loop
+Return
+
+exit_if_no_zero:
+i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1: k = 0: Do While k < N: k = k + 1:
+     If p(i, j, k) = 0 Then Return
+Loop: Loop: Loop
+
+End Sub
+
+
+Function allPfixed(p, i0, j0, k0, i1, j1, k1)
+'starting from any Pijk   (>0 or =0)
+
+'it can be varied only if
+' it is possible to find out 3 numbers a,b,c such that :
+' the values of probabilities located at the cells of coordinates(a,j,c);(i,b,c) and (a,b,k) are POSITIVE.
+' in other words  (i,j,k),(a,j,c);(i,b,c) and (a,b,k)  are coordinates of a vertex of a rectangular prism with positive probabilities
+
+
+'the algoritm results:
+'---------------------
+'Consider all possible values of i,j,k
+' If  P(i,j,k) > 0 then
+'   Consider all possible values of a  (i<a <=N)
+'   Consider all possible values of b,c  (1<b<N and 1<c<N)
+' If P(a,b,k) >0 and P(a,j,c) >0 and P(i,b,c) >0 then
+'                                                     all vertices of the rectangular prism can be varied satisfying constraints;
+'                                                     allPfixed <-- false : at least one Pijk can be varied
+
+'allPfixed = true if none of the Pijk is alterable i.e. the given distribution is the unique distribution with these marginal distributions
+
+
+
+Dim i As Integer, j As Integer, k As Integer, a As Integer, b As Integer, c As Integer
+i = 0: Do While i < N: i = i + 1: j = 0: Do While j < N: j = j + 1: k = 0: Do While k < N: k = k + 1
+    If p(i, j, k) > 0 Then
+        a = 0: Do While a < N: a = a + 1: If a = i Then a = a + 1: If a > N Then Exit Do
+        b = 0: Do While b < N: b = b + 1: If b = j Then b = b + 1: If b > N Then Exit Do
+        If p(a, b, k) > 0 Then
+            c = 0: Do While c < N: c = c + 1: If c = k Then c = c + 1: If c > N Then Exit Do
+                If p(a, j, c) * p(i, b, c) > 0 Then
+                      i0 = i: j0 = j: k0 = k: i1 = i: j1 = b: k1 = c
+                        allPfixed = False: Exit Function
+                End If
+            Loop 'c
+        End If
+        Loop: Loop
+    End If
+Loop: Loop: Loop
+
+allPfixed = True
+
+End Function
+
